@@ -41,7 +41,7 @@ const video=document.getElementById('video'), cropCanvas=document.getElementById
 let stream=null, worker=null, timer=null, busy=false, lastAccepted='', lastSeen='', missCount=0;
 let inv=JSON.parse(localStorage.getItem('panini_inventory_v11')||'{}');
 let history=JSON.parse(localStorage.getItem('panini_scan_history_v11')||'[]');
-const VALID=new Set('ARG AUS AUT BEL BIH BRA CAN CIV COD COL CPV CRO CUW CZE DZA ECU EGY ENG ESP FRA GER GHA HAI HTI IRN IRI IRQ JOR JPN KOR KSA MAR MEX NED NOR NZL PAN PAR POR QAT RSA SCO SEN SUI SWE TUN TUR URU USA UZB'.split(' '));
+const VALID=new Set('ALG ARG AUS AUT BEL BIH BRA CAN CIV COD COL CPV CRO CUW CZE DZA ECU EGY ENG ESP FRA GER GHA HAI HTI IRN IRI IRQ JOR JPN KOR KSA MAR MEX NED NOR NZL PAN PAR POR QAT RSA SCO SEN SUI SWE TUN TUR URU USA UZB'.split(' '));
 const digitFix={O:'0',Q:'0',D:'0',I:'1',L:'1',T:'1',Z:'2',S:'5',G:'6',B:'8'};
 function save(){localStorage.setItem('panini_inventory_v11',JSON.stringify(inv));localStorage.setItem('panini_scan_history_v11',JSON.stringify(history));render()}
 function render(){document.getElementById('tbody').innerHTML=Object.keys(inv).sort().map(k=>`<tr><td>${k}</td><td class="right">${inv[k]}</td><td class="right">${Math.max(0,inv[k]-1)}</td></tr>`).join('');const vals=Object.values(inv);document.getElementById('summary').textContent=`Total ${vals.reduce((a,b)=>a+b,0)} | Unique ${Object.keys(inv).length} | Duplicates ${vals.reduce((a,b)=>a+Math.max(0,b-1),0)}`}
