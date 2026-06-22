@@ -1,222 +1,137 @@
 <!doctype html>
 <html lang="en">
 <head>
-  <meta charset="utf-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
-  <title>Panini World Cup Sticker Tracker</title>
-  <script src="https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js"></script>
-  <style>
-    :root { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; color: #172033; background: #f6f7fb; }
-    body { margin: 0; padding: 16px; }
-    .wrap { max-width: 980px; margin: 0 auto; }
-    .card { background: white; border-radius: 18px; padding: 16px; margin: 14px 0; box-shadow: 0 4px 18px rgba(20, 30, 60, .08); }
-    h1 { font-size: 24px; margin: 0 0 6px; }
-    h2 { font-size: 18px; margin: 0 0 12px; }
-    p { line-height: 1.35; }
-    button, input[type=file]::file-selector-button { border: 0; border-radius: 12px; padding: 12px 14px; font-weight: 700; margin: 4px 4px 4px 0; background: #172033; color: white; }
-    button.secondary { background: #e8ebf2; color: #172033; }
-    button.danger { background: #b42318; }
-    input[type=text] { padding: 12px; border-radius: 12px; border: 1px solid #c9cfdd; width: 180px; font-size: 16px; text-transform: uppercase; }
-    video, canvas, img { width: 100%; max-height: 560px; object-fit: contain; background: #111827; border-radius: 14px; }
-    .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap: 12px; }
-    .pill { display: inline-block; background: #eef2ff; border-radius: 999px; padding: 6px 10px; margin: 4px; font-weight: 700; }
-    .pill.bad { background: #fee4e2; }
-    .small { color: #5b6475; font-size: 13px; }
-    pre { white-space: pre-wrap; background: #0f172a; color: #e5e7eb; border-radius: 14px; padding: 12px; max-height: 220px; overflow: auto; }
-    table { width: 100%; border-collapse: collapse; }
-    th, td { border-bottom: 1px solid #edf0f5; padding: 9px; text-align: left; }
-    th { background: #f8fafc; position: sticky; top: 0; }
-    .tablebox { max-height: 420px; overflow: auto; border: 1px solid #edf0f5; border-radius: 14px; }
-    .status { font-weight: 700; }
-  </style>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Panini Sticker OCR Tracker</title>
+<script src="https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js"></script>
+<style>
+  body{font-family:-apple-system,BlinkMacSystemFont,Segoe UI,Roboto,Arial,sans-serif;margin:0;background:#f6f7f9;color:#111}
+  header{background:#111;color:white;padding:14px 16px} h1{font-size:20px;margin:0} .wrap{padding:14px;max-width:900px;margin:auto}
+  .card{background:white;border-radius:14px;padding:14px;margin:12px 0;box-shadow:0 1px 8px rgba(0,0,0,.08)}
+  button,input,textarea{font-size:16px;border-radius:10px;border:1px solid #ccc;padding:10px;margin:4px 4px 4px 0} button{background:#111;color:white;border:none} button.secondary{background:#555} button.warn{background:#b00020}
+  #stage{position:relative;background:#000;border-radius:14px;overflow:hidden;max-width:720px;margin:auto}
+  video{width:100%;display:block}
+  #overlay{position:absolute;inset:0;pointer-events:none}
+  #box{position:absolute;left:50%;top:62%;transform:translate(-50%,-50%);width:58%;height:13%;border:4px solid #00ff77;border-radius:10px;box-shadow:0 0 0 9999px rgba(0,0,0,.38)}
+  #box:before{content:'Place sticker ID here, e.g. IRQ 9';position:absolute;left:0;right:0;top:-34px;text-align:center;color:#00ff77;font-weight:700;text-shadow:0 1px 2px #000;font-size:14px}
+  #cropPreview{max-width:100%;border:1px solid #ddd;border-radius:10px;background:#fff}
+  .mono{font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;white-space:pre-wrap;background:#f1f1f1;padding:10px;border-radius:10px;min-height:40px}
+  table{width:100%;border-collapse:collapse} th,td{border-bottom:1px solid #eee;padding:8px;text-align:left} th{background:#fafafa}
+  .good{color:#087b2f;font-weight:700}.bad{color:#b00020;font-weight:700}.small{font-size:13px;color:#555}
+</style>
 </head>
 <body>
+<header><h1>Panini Sticker OCR Tracker</h1></header>
 <div class="wrap">
   <div class="card">
-    <h1>Panini World Cup Sticker Tracker</h1>
-    <p class="small">v4: strict 3-letter code + 1 or 2 digit number parser. Example: <b>IRQ 9</b>, <b>ARG 12</b>. No forced hyphens.</p>
-    <div id="support" class="small"></div>
+    <b>Scan mode:</b> Put only the sticker ID inside the green rectangle. This version crops the rectangle first, then OCRs only that area.
+    <div class="small">Expected format: 3 letters + 1 or 2 numbers, e.g. IRQ 9, ARG 12, USA 3.</div>
   </div>
 
-  <div class="grid">
-    <div class="card">
-      <h2>1. Capture</h2>
-      <button id="startCamera">Start Camera</button>
-      <button id="takePhoto" class="secondary">Scan Camera Frame</button>
-      <br />
-      <input id="fileInput" type="file" accept="image/*" />
-      <p class="small">Tip: put the sticker ID area close to the camera. 5 to 15 stickers per scan is more reliable than 50.</p>
-      <video id="video" playsinline autoplay muted></video>
-      <canvas id="canvas" style="display:none"></canvas>
-      <img id="preview" alt="preview" style="display:none" />
-    </div>
-
-    <div class="card">
-      <h2>2. OCR and extracted IDs</h2>
-      <button id="runOCR">Run OCR on Image</button>
-      <button id="addFound" class="secondary">Add Found IDs</button>
-      <div id="ocrStatus" class="status small">Waiting for image.</div>
-      <div id="found"></div>
-      <h3>Manual add</h3>
-      <input id="manual" type="text" placeholder="IRQ 9" />
-      <button id="manualAdd" class="secondary">Add</button>
-      <p class="small">Accepted format: 3 letters + 1 or 2 numbers. Spaces, dashes, dots, and OCR line breaks are accepted, but saved as a space.</p>
+  <div class="card">
+    <button id="startBtn">Start Camera</button>
+    <button id="scanBtn" class="secondary">Scan Rectangle</button>
+    <button id="stopBtn" class="secondary">Stop Camera</button>
+    <input id="fileInput" type="file" accept="image/*" capture="environment" />
+    <div id="status" class="small">Ready.</div>
+    <div id="stage">
+      <video id="video" autoplay playsinline muted></video>
+      <div id="overlay"><div id="box"></div></div>
     </div>
   </div>
 
   <div class="card">
-    <h2>Raw OCR text</h2>
-    <pre id="raw">Nothing scanned yet.</pre>
+    <h3>Cropped scan area</h3>
+    <canvas id="cropCanvas"></canvas>
   </div>
 
-  <div class="grid">
-    <div class="card">
-      <h2>Inventory</h2>
-      <p><span id="total" class="pill">Total: 0</span><span id="unique" class="pill">Unique: 0</span><span id="dupes" class="pill">Duplicates: 0</span></p>
-      <button id="exportCSV" class="secondary">Export CSV</button>
-      <button id="copyDupes" class="secondary">Copy Duplicates</button>
-      <button id="clearAll" class="danger">Clear All</button>
-      <div class="tablebox"><table><thead><tr><th>Sticker ID</th><th>Qty</th><th>Duplicates</th></tr></thead><tbody id="tbody"></tbody></table></div>
-    </div>
+  <div class="card">
+    <h3>OCR result</h3>
+    <div>Detected sticker ID: <span id="detected" class="bad">None</span></div>
+    <div class="small">Raw OCR text:</div>
+    <div id="raw" class="mono"></div>
+    <input id="manual" placeholder="Manual correction, e.g. IRQ 9" />
+    <button id="addBtn">Add Sticker</button>
+  </div>
 
-    <div class="card">
-      <h2>Duplicates / swap list</h2>
-      <div id="dupeList" class="small">No duplicates yet.</div>
-    </div>
+  <div class="card">
+    <h3>Inventory</h3>
+    <button id="exportBtn" class="secondary">Export CSV</button>
+    <button id="clearBtn" class="warn">Clear All</button>
+    <table><thead><tr><th>Sticker</th><th>Qty</th><th>Duplicate</th></tr></thead><tbody id="tbody"></tbody></table>
   </div>
 </div>
-
 <script>
-const VALID_CODES = new Set(`MEX RSA KOR CZE CAN BIH QAT SUI BRA MAR HTI SCO USA PAR AUS TUR GER CUW CIV ECU NED JPN SWE TUN ESP CPV KSA URU BEL EGY IRI NZL FRA SEN IRQ NOR ARG DZA AUT JOR POR COD UZB COL ENG CRO GHA PAN`.split(/\s+/));
-
+const validCodes = new Set(['ARG','AUS','AUT','BEL','BIH','BRA','CAN','CIV','COD','COL','CPV','CRO','CUW','CZE','DZA','ECU','EGY','ENG','ESP','FRA','GER','GHA','HAI','HTI','IRN','IRI','IRQ','JPN','JOR','KOR','KSA','MAR','MEX','NED','NOR','NZL','PAN','PAR','POR','QAT','RSA','SCO','SEN','SUI','SWE','TUN','TUR','URU','USA','UZB']);
 const video = document.getElementById('video');
-const canvas = document.getElementById('canvas');
-const preview = document.getElementById('preview');
-const foundDiv = document.getElementById('found');
+const statusEl = document.getElementById('status');
 const rawEl = document.getElementById('raw');
-const statusEl = document.getElementById('ocrStatus');
-const tbody = document.getElementById('tbody');
-let currentImage = null;
-let lastFound = [];
-let inventory = JSON.parse(localStorage.getItem('paniniInventoryV4') || '{}');
-
-function save(){ localStorage.setItem('paniniInventoryV4', JSON.stringify(inventory)); render(); }
-function normalizeId(s){
-  if(!s) return null;
-  let t = s.toUpperCase().replace(/[\u2010-\u2015]/g, '-').replace(/[^A-Z0-9\s\-.]/g, ' ');
-  t = t.replace(/[\-.]+/g, ' ').replace(/\s+/g, ' ').trim();
-  const m = t.match(/^([A-Z]{3})\s*([0-9]{1,2})$/);
-  if(!m) return null;
-  const code = m[1];
-  const num = parseInt(m[2], 10);
-  if(!VALID_CODES.has(code)) return null;
-  if(num < 1 || num > 99) return null;
-  return `${code} ${num}`;
-}
-
-function extractStickerIds(text){
-  const upper = (text || '').toUpperCase()
-    .replace(/[\u2010-\u2015]/g, '-')
-    .replace(/\b([A-Z]{3})\s*[OQ]\b/g, '$1 0')
-    .replace(/\b([A-Z]{3})\s*I\b/g, '$1 1');
-
-  const out = [];
-  const seen = new Set();
-
-  // First pass: normal nearby patterns, e.g. IRQ 9, IRQ-9, IRQ.9, IRQ\n9
-  const re = /\b([A-Z]{3})\s*[-.]?\s*([0-9]{1,2})\b/g;
-  let m;
-  while((m = re.exec(upper)) !== null){
-    const id = normalizeId(`${m[1]} ${m[2]}`);
-    if(id && !seen.has(id)){ seen.add(id); out.push(id); }
-  }
-
-  // Second pass: OCR sometimes inserts junk between code and number, e.g. IRQ | 9
-  const tokens = upper.replace(/[^A-Z0-9]+/g, ' ').split(/\s+/).filter(Boolean);
-  for(let i=0; i<tokens.length-1; i++){
-    const code = tokens[i];
-    const num = tokens[i+1];
-    if(/^[A-Z]{3}$/.test(code) && /^[0-9]{1,2}$/.test(num)){
-      const id = normalizeId(`${code} ${num}`);
-      if(id && !seen.has(id)){ seen.add(id); out.push(id); }
-    }
-  }
-  return out;
-}
-
-function addIds(ids){ ids.forEach(id => inventory[id] = (inventory[id] || 0) + 1); save(); }
+const detectedEl = document.getElementById('detected');
+const manualEl = document.getElementById('manual');
+const cropCanvas = document.getElementById('cropCanvas');
+let stream=null, lastDetected='';
+let inventory = JSON.parse(localStorage.getItem('panini_inventory_v5') || '{}');
+function setStatus(s){statusEl.textContent=s}
+function save(){localStorage.setItem('panini_inventory_v5', JSON.stringify(inventory)); render();}
 function render(){
-  const rows = Object.entries(inventory).sort((a,b)=> a[0].localeCompare(b[0], undefined, {numeric:true}));
-  tbody.innerHTML = rows.map(([id, qty]) => `<tr><td>${id}</td><td>${qty}</td><td>${Math.max(0, qty-1)}</td></tr>`).join('');
-  const total = rows.reduce((s,[,q])=>s+q,0);
-  const dupeCount = rows.reduce((s,[,q])=>s+Math.max(0,q-1),0);
-  document.getElementById('total').textContent = `Total: ${total}`;
-  document.getElementById('unique').textContent = `Unique: ${rows.length}`;
-  document.getElementById('dupes').textContent = `Duplicates: ${dupeCount}`;
-  const dupes = rows.filter(([,q])=>q>1).map(([id,q])=>`${id} x${q-1}`);
-  document.getElementById('dupeList').innerHTML = dupes.length ? dupes.map(x=>`<span class="pill">${x}</span>`).join('') : 'No duplicates yet.';
+ const tbody=document.getElementById('tbody'); tbody.innerHTML='';
+ Object.keys(inventory).sort().forEach(k=>{const q=inventory[k]; const tr=document.createElement('tr'); tr.innerHTML=`<td>${k}</td><td>${q}</td><td>${Math.max(0,q-1)}</td>`; tbody.appendChild(tr);});
 }
-
+function normalizeText(t){return (t||'').toUpperCase().replace(/[|]/g,'I').replace(/[§$]/g,'S').replace(/[()\[\]{}]/g,' ').replace(/[-_:;,.]/g,' ').replace(/\s+/g,' ').trim();}
+function extractSticker(text){
+ let clean=normalizeText(text);
+ const tokens=clean.split(' ').filter(Boolean);
+ for(let i=0;i<tokens.length;i++){
+   let code=tokens[i].replace(/[^A-Z]/g,'');
+   let num=(tokens[i+1]||'').replace(/[^0-9]/g,'');
+   if(validCodes.has(code) && /^[0-9]{1,2}$/.test(num)) return `${code} ${parseInt(num,10)}`;
+ }
+ let m=clean.match(/\b([A-Z]{3})\s*([0-9]{1,2})\b/);
+ if(m && validCodes.has(m[1])) return `${m[1]} ${parseInt(m[2],10)}`;
+ return '';
+}
 async function startCamera(){
-  try{
-    const stream = await navigator.mediaDevices.getUserMedia({video:{facingMode:'environment', width:{ideal:1920}, height:{ideal:1080}}, audio:false});
-    video.srcObject = stream;
-    statusEl.textContent = 'Camera started. Bring the sticker IDs close, then tap Scan Camera Frame.';
-  }catch(e){ statusEl.textContent = 'Camera failed: ' + e.message + '. Use Upload Photo or host via HTTPS.'; }
+ try{
+  stream=await navigator.mediaDevices.getUserMedia({video:{facingMode:{ideal:'environment'},width:{ideal:1920},height:{ideal:1080}},audio:false});
+  video.srcObject=stream; setStatus('Camera started. Place the sticker ID inside the green rectangle.');
+ }catch(e){setStatus('Camera failed: '+e.message+' Try hosting on HTTPS or use photo upload.');}
 }
-function captureFrame(){
-  if(!video.videoWidth){ statusEl.textContent = 'Camera is not ready yet.'; return; }
-  canvas.width = video.videoWidth; canvas.height = video.videoHeight;
-  canvas.getContext('2d').drawImage(video,0,0);
-  currentImage = canvas.toDataURL('image/jpeg', .95);
-  preview.src = currentImage; preview.style.display = 'block';
-  statusEl.textContent = 'Frame captured. Tap Run OCR on Image.';
+function stopCamera(){if(stream){stream.getTracks().forEach(t=>t.stop()); stream=null;} video.srcObject=null; setStatus('Camera stopped.');}
+function cropFromVideo(){
+ const vw=video.videoWidth, vh=video.videoHeight;
+ if(!vw||!vh) throw new Error('Video not ready');
+ const x=vw*0.21, y=vh*0.555, w=vw*0.58, h=vh*0.13;
+ drawCrop(video,x,y,w,h);
 }
-async function runOCR(){
-  if(!currentImage){ statusEl.textContent = 'No image selected yet.'; return; }
-  statusEl.textContent = 'Running OCR...';
-  foundDiv.innerHTML = '';
-  try{
-    const result = await Tesseract.recognize(currentImage, 'eng', {
-      tessedit_char_whitelist: 'ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789-. ',
-      preserve_interword_spaces: '1'
-    });
-    const text = result.data.text || '';
-    rawEl.textContent = text || '(OCR returned no text)';
-    lastFound = extractStickerIds(text);
-    if(lastFound.length){
-      foundDiv.innerHTML = lastFound.map(id=>`<span class="pill">${id}</span>`).join('');
-      statusEl.textContent = `Found ${lastFound.length} sticker ID(s). Review, then tap Add Found IDs.`;
-    } else {
-      foundDiv.innerHTML = '<span class="pill bad">No valid 3-letter + 1/2 digit IDs found</span>';
-      statusEl.textContent = 'No IDs found. Check raw OCR text. Try closer photo of only the sticker code area.';
-    }
-  }catch(e){ statusEl.textContent = 'OCR failed: ' + e.message; }
+function drawCrop(source,x,y,w,h){
+ const scale=3;
+ cropCanvas.width=w*scale; cropCanvas.height=h*scale;
+ cropCanvas.style.width='100%'; cropCanvas.style.maxWidth='720px';
+ const ctx=cropCanvas.getContext('2d');
+ ctx.imageSmoothingEnabled=true;
+ ctx.drawImage(source,x,y,w,h,0,0,cropCanvas.width,cropCanvas.height);
+ const img=ctx.getImageData(0,0,cropCanvas.width,cropCanvas.height);
+ const d=img.data;
+ for(let i=0;i<d.length;i+=4){
+   const gray=0.299*d[i]+0.587*d[i+1]+0.114*d[i+2];
+   const v=gray>145?255:0;
+   d[i]=d[i+1]=d[i+2]=v;
+ }
+ ctx.putImageData(img,0,0);
 }
-
-document.getElementById('startCamera').onclick = startCamera;
-document.getElementById('takePhoto').onclick = captureFrame;
-document.getElementById('runOCR').onclick = runOCR;
-document.getElementById('addFound').onclick = () => addIds(lastFound);
-document.getElementById('manualAdd').onclick = () => { const id = normalizeId(document.getElementById('manual').value); if(id){ addIds([id]); document.getElementById('manual').value=''; } else alert('Use format like IRQ 9, ARG 12, USA 3'); };
-document.getElementById('fileInput').onchange = e => {
-  const file = e.target.files[0]; if(!file) return;
-  const reader = new FileReader();
-  reader.onload = () => { currentImage = reader.result; preview.src = currentImage; preview.style.display='block'; statusEl.textContent='Image loaded. Tap Run OCR on Image.'; };
-  reader.readAsDataURL(file);
-};
-document.getElementById('exportCSV').onclick = () => {
-  const rows = [['Sticker ID','Quantity','Duplicates'], ...Object.entries(inventory).sort().map(([id,q])=>[id,q,Math.max(0,q-1)])];
-  const csv = rows.map(r=>r.map(v=>`"${String(v).replaceAll('"','""')}"`).join(',')).join('\n');
-  const blob = new Blob([csv], {type:'text/csv'}); const a=document.createElement('a'); a.href=URL.createObjectURL(blob); a.download='panini_inventory.csv'; a.click();
-};
-document.getElementById('copyDupes').onclick = async () => {
-  const text = Object.entries(inventory).filter(([,q])=>q>1).sort().map(([id,q])=>`${id} x${q-1}`).join('\n');
-  await navigator.clipboard.writeText(text || 'No duplicates'); alert('Duplicate list copied.');
-};
-document.getElementById('clearAll').onclick = () => { if(confirm('Clear all inventory on this device?')){ inventory={}; save(); } };
-
-document.getElementById('support').textContent = location.protocol === 'https:' ? 'HTTPS detected. Camera should work after permission is allowed.' : 'Not HTTPS. Camera may be blocked, but photo upload should work.';
+async function ocrCanvas(){
+ setStatus('Reading cropped rectangle...'); rawEl.textContent=''; detectedEl.textContent='None'; detectedEl.className='bad';
+ const result=await Tesseract.recognize(cropCanvas,'eng',{logger:m=>{if(m.status) setStatus(m.status + (m.progress?` ${Math.round(m.progress*100)}%`:''));}, tessedit_char_whitelist:'ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789 '});
+ const raw=result.data.text || ''; rawEl.textContent=raw;
+ const id=extractSticker(raw); lastDetected=id; manualEl.value=id;
+ if(id){detectedEl.textContent=id; detectedEl.className='good'; setStatus('Detected '+id);} else {setStatus('No sticker ID detected. Move ID closer, fill the rectangle, and rescan.');}
+}
+async function scanRectangle(){try{cropFromVideo(); await ocrCanvas();}catch(e){setStatus('Scan failed: '+e.message);}}
+function addSticker(){const id=extractSticker(manualEl.value)||manualEl.value.toUpperCase().trim(); if(!/^([A-Z]{3}) [0-9]{1,2}$/.test(id)){setStatus('Invalid format. Use e.g. IRQ 9'); return;} inventory[id]=(inventory[id]||0)+1; save(); setStatus('Added '+id);}
+function exportCSV(){let rows=['Sticker,Qty,Duplicate']; Object.keys(inventory).sort().forEach(k=>rows.push(`${k},${inventory[k]},${Math.max(0,inventory[k]-1)}`)); const blob=new Blob([rows.join('\n')],{type:'text/csv'}); const a=document.createElement('a'); a.href=URL.createObjectURL(blob); a.download='panini_inventory.csv'; a.click();}
+document.getElementById('startBtn').onclick=startCamera; document.getElementById('stopBtn').onclick=stopCamera; document.getElementById('scanBtn').onclick=scanRectangle; document.getElementById('addBtn').onclick=addSticker; document.getElementById('exportBtn').onclick=exportCSV; document.getElementById('clearBtn').onclick=()=>{if(confirm('Clear all inventory?')){inventory={};save();}};
+document.getElementById('fileInput').onchange=e=>{const f=e.target.files[0]; if(!f)return; const img=new Image(); img.onload=async()=>{const w=img.naturalWidth,h=img.naturalHeight; drawCrop(img,w*.21,h*.555,w*.58,h*.13); await ocrCanvas();}; img.src=URL.createObjectURL(f);};
 render();
 </script>
 </body>
