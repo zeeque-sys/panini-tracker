@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
-<title>Panini Sticker Scanner v14</title>
+<title>Panini Sticker Scanner v16</title>
 <script src="https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js"></script>
 <style>
 :root{--bg:#f4f6fb;--card:#fff;--text:#111827;--muted:#6b7280;--line:#e5e7eb;--dark:#111827;--green:#10b981;--red:#dc2626;--blue:#2563eb}
@@ -12,7 +12,7 @@
 </head>
 <body><main>
 <h1>Panini Sticker Scanner</h1>
-<div class="muted">v15: lighter camera overlay, larger scan box, raw crop preview, OCR uses hidden processed crop.</div>
+<div class="muted">v16: OCR uses the normal crop first, then a mild enhanced fallback. No harsh thresholding.</div>
 <section class="card">
   <div class="row">
     <button id="startBtn">Start Rear Camera</button>
@@ -27,10 +27,10 @@
     <div id="box" class="scanBox"></div>
     <div class="label">CODE ONLY</div>
   </div>
-  <p class="small muted">Place only the code inside the green box. It scans automatically after the camera starts. If you still see the old small box, refresh the GitHub Pages link with ?v=14.</p>
+  <p class="small muted">Place only the code inside the green box. It scans automatically after the camera starts. If you still see the old small box, refresh the GitHub Pages link with ?v=16.</p>
 </section>
 <div class="grid">
-<section class="card"><h2>Crop preview</h2><canvas id="cropCanvas"></canvas><p class="small muted">This preview now shows the normal camera crop. OCR still uses a hidden high-contrast copy.</p></section>
+<section class="card"><h2>Crop preview</h2><canvas id="cropCanvas"></canvas><p class="small muted">This is the same normal crop used for the first OCR pass. The app only uses a mild fallback if needed.</p></section>
 <section class="card"><h2>Detected</h2><div id="detected" class="big">None</div><p id="hint" class="muted"></p><h2>Raw OCR</h2><textarea id="rawText" readonly></textarea></section>
 </div>
 <section class="card"><h2>Recent scans</h2><div id="recent"></div></section>
@@ -40,11 +40,11 @@
 <script>
 const video=document.getElementById('video'), cropCanvas=document.getElementById('cropCanvas'), rawText=document.getElementById('rawText'), statusEl=document.getElementById('status'), detectedEl=document.getElementById('detected'), hintEl=document.getElementById('hint'), boxEl=document.getElementById('box');
 let stream=null, worker=null, timer=null, busy=false, lastAccepted='', lastSeen='', missCount=0;
-let inv=JSON.parse(localStorage.getItem('panini_inventory_v14')||localStorage.getItem('panini_inventory_v13')||localStorage.getItem('panini_inventory_v12')||localStorage.getItem('panini_inventory_v11')||'{}');
-let history=JSON.parse(localStorage.getItem('panini_scan_history_v14')||localStorage.getItem('panini_scan_history_v13')||localStorage.getItem('panini_scan_history_v12')||'[]');
+let inv=JSON.parse(localStorage.getItem('panini_inventory_v16')||localStorage.getItem('panini_inventory_v14')||localStorage.getItem('panini_inventory_v13')||localStorage.getItem('panini_inventory_v12')||localStorage.getItem('panini_inventory_v11')||'{}');
+let history=JSON.parse(localStorage.getItem('panini_scan_history_v16')||localStorage.getItem('panini_scan_history_v14')||localStorage.getItem('panini_scan_history_v13')||localStorage.getItem('panini_scan_history_v12')||'[]');
 const VALID=new Set('ARG AUS AUT BEL BIH BRA CAN CIV COD COL CPV CRO CUW CZE DZA ECU EGY ENG ESP FRA GER GHA HAI HTI IRN IRI IRQ JOR JPN KOR KSA MAR MEX NED NOR NZL PAN PAR POR QAT RSA SCO SEN SUI SWE TUN TUR URU USA UZB'.split(' '));
 const digitFix={O:'0',Q:'0',D:'0',I:'1',L:'1',T:'1',Z:'2',S:'5',G:'6',B:'8'};
-function save(){localStorage.setItem('panini_inventory_v14',JSON.stringify(inv));localStorage.setItem('panini_scan_history_v14',JSON.stringify(history.slice(0,50)));render()}
+function save(){localStorage.setItem('panini_inventory_v16',JSON.stringify(inv));localStorage.setItem('panini_scan_history_v16',JSON.stringify(history.slice(0,50)));render()}
 function removeOne(id){if(!id||!inv[id])return;inv[id]-=1;if(inv[id]<=0)delete inv[id];}
 function undoLast(){const last=history.shift(); if(!last){detectedEl.innerHTML='<span class="badText">Nothing to undo</span>';return;} removeOne(last.id); save(); detectedEl.innerHTML=`<span class="badText">Removed ${last.id}</span>`; hintEl.textContent='Last scan undone.';}
 function deleteHistory(i){const item=history.splice(i,1)[0]; if(item){removeOne(item.id); save(); detectedEl.innerHTML=`<span class="badText">Removed ${item.id}</span>`;}}
@@ -77,41 +77,66 @@ function extractId(text){
   return '';
 }
 async function ensureWorker(){if(worker)return worker;statusEl.textContent='Loading OCR...';worker=await Tesseract.createWorker('eng');await worker.setParameters({tessedit_char_whitelist:'ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789 ',tessedit_pageseg_mode:Tesseract.PSM.SINGLE_WORD});return worker}
+function makeCanvas(w,h){const c=document.createElement('canvas');c.width=Math.max(1,Math.round(w));c.height=Math.max(1,Math.round(h));return c}
 function crop(){
   if(!video.videoWidth) throw new Error('Camera not ready');
   const vw=video.videoWidth,vh=video.videoHeight,r={x:.30,y:.36,w:.40,h:.29};
   const sx=vw*r.x,sy=vh*r.y,sw=vw*r.w,sh=vh*r.h,scale=5;
 
-  // 1) Show a normal, bright crop preview to the user.
-  cropCanvas.width=Math.max(1,sw*scale);
-  cropCanvas.height=Math.max(1,sh*scale);
-  const previewCtx=cropCanvas.getContext('2d',{willReadFrequently:true});
-  previewCtx.imageSmoothingEnabled=true;
-  previewCtx.imageSmoothingQuality='high';
-  previewCtx.drawImage(video,sx,sy,sw,sh,0,0,cropCanvas.width,cropCanvas.height);
+  // Normal crop. This is shown to the user and is also the first OCR input.
+  cropCanvas.width=Math.max(1,Math.round(sw*scale));
+  cropCanvas.height=Math.max(1,Math.round(sh*scale));
+  const pctx=cropCanvas.getContext('2d',{willReadFrequently:true});
+  pctx.imageSmoothingEnabled=true;
+  pctx.imageSmoothingQuality='high';
+  pctx.clearRect(0,0,cropCanvas.width,cropCanvas.height);
+  pctx.drawImage(video,sx,sy,sw,sh,0,0,cropCanvas.width,cropCanvas.height);
 
-  // 2) Create a separate hidden OCR canvas with preprocessing.
-  const ocrCanvas=document.createElement('canvas');
-  ocrCanvas.width=cropCanvas.width;
-  ocrCanvas.height=cropCanvas.height;
-  const ctx=ocrCanvas.getContext('2d',{willReadFrequently:true});
-  ctx.imageSmoothingEnabled=true;
-  ctx.imageSmoothingQuality='high';
-  ctx.drawImage(video,sx,sy,sw,sh,0,0,ocrCanvas.width,ocrCanvas.height);
-
-  const img=ctx.getImageData(0,0,ocrCanvas.width,ocrCanvas.height),d=img.data;
+  // Mild fallback only. No hard black/white threshold, because that damaged digits like 5/6/9.
+  const mild=makeCanvas(cropCanvas.width,cropCanvas.height);
+  const mctx=mild.getContext('2d',{willReadFrequently:true});
+  mctx.imageSmoothingEnabled=true;
+  mctx.imageSmoothingQuality='high';
+  mctx.drawImage(cropCanvas,0,0);
+  const img=mctx.getImageData(0,0,mild.width,mild.height),d=img.data;
   for(let i=0;i<d.length;i+=4){
     let g=.299*d[i]+.587*d[i+1]+.114*d[i+2];
-    // White text on black: invert for OCR, but do not show this to the user.
-    g=255-g;
-    g=(g-128)*1.75+128;
+    // Gentle contrast only, keep gray detail intact.
+    g=(g-128)*1.15+128;
     g=Math.max(0,Math.min(255,g));
     d[i]=d[i+1]=d[i+2]=g;
   }
-  ctx.putImageData(img,0,0);
-  return ocrCanvas;
+  mctx.putImageData(img,0,0);
+  return {normal:cropCanvas,mild};
 }
-async function scan(){await ensureWorker(); const canvas=crop(); const {data:{text}}=await worker.recognize(canvas); rawText.value=text; const id=extractId(text); detectedEl.innerHTML=id?`<span class="okText">${id}</span>`:'<span class="badText">None</span>'; hintEl.textContent=id?'Valid code found.':'No valid code yet.'; return id}
+async function scan(){
+  await ensureWorker();
+  const canvases=crop();
+
+  // Pass 1: original crop. This often works better for bold white text on dark label.
+  const r1=await worker.recognize(canvases.normal);
+  const t1=r1.data.text || '';
+  let id=extractId(t1);
+  let finalText='Pass 1 normal crop:
+'+t1.trim();
+
+  // Pass 2: mild enhanced fallback, only if needed.
+  if(!id){
+    const r2=await worker.recognize(canvases.mild);
+    const t2=r2.data.text || '';
+    const id2=extractId(t2);
+    finalText+='
+
+Pass 2 mild crop:
+'+t2.trim();
+    id=id2;
+  }
+
+  rawText.value=finalText;
+  detectedEl.innerHTML=id?`<span class="okText">${id}</span>`:'<span class="badText">None</span>';
+  hintEl.textContent=id?'Valid code found.':'No valid code yet.';
+  return id;
+}
 async function loop(){if(busy||!stream)return; busy=true; try{const id=await scan(); if(id){boxEl.className='scanBox ok'; statusEl.textContent=`Detected ${id}`; missCount=0; if(document.getElementById('autoAdd').checked && id!==lastAccepted){add(id); lastAccepted=id; lastSeen=id;}} else {boxEl.className='scanBox'; statusEl.textContent='Scanning...'; if(++missCount>=2){lastAccepted=''; lastSeen='';}}}catch(e){statusEl.textContent=e.message} busy=false;}
 async function start(){try{stream=await navigator.mediaDevices.getUserMedia({video:{facingMode:{exact:'environment'},width:{ideal:1920},height:{ideal:1080}},audio:false}).catch(()=>navigator.mediaDevices.getUserMedia({video:{facingMode:'environment',width:{ideal:1920},height:{ideal:1080}},audio:false})); video.srcObject=stream; await video.play(); video.style.transform='none'; await ensureWorker(); statusEl.textContent='Auto scan running.'; if(timer)clearInterval(timer); timer=setInterval(loop,900)}catch(e){statusEl.innerHTML=`<span class="badText">Camera failed: ${e.message}</span>`}}
 function stop(){if(timer)clearInterval(timer);timer=null;if(stream){stream.getTracks().forEach(t=>t.stop());stream=null}statusEl.textContent='Stopped.'}
