@@ -1,0 +1,91 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+<title>Panini Sticker Scanner v11</title>
+<script src="https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js"></script>
+<style>
+:root{--bg:#f4f6fb;--card:#fff;--text:#111827;--muted:#6b7280;--line:#e5e7eb;--dark:#111827;--green:#10b981;--red:#dc2626;--blue:#2563eb}
+*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--text);font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Arial,sans-serif}main{max-width:960px;margin:auto;padding:14px}.card{background:var(--card);border:1px solid var(--line);border-radius:18px;padding:16px;margin:12px 0;box-shadow:0 8px 24px rgba(15,23,42,.06)}h1{font-size:24px;margin:6px 0 4px}h2{font-size:18px;margin:0 0 12px}.muted{color:var(--muted)}button,input{font:inherit}button{border:0;border-radius:12px;padding:12px 16px;font-weight:700;background:var(--dark);color:#fff;margin:4px;cursor:pointer}.secondary{background:#e5e7eb;color:#111827}.danger{background:#fee2e2;color:#991b1b}.row{display:flex;gap:8px;align-items:center;flex-wrap:wrap}.stage{position:relative;background:#000;border-radius:16px;overflow:hidden;max-width:760px;margin:auto}.stage video{width:100%;display:block;transform:scaleX(-1)}.scanBox{position:absolute;left:44%;top:43%;width:12%;height:17%;border:4px solid var(--green);border-radius:10px;box-shadow:0 0 0 9999px rgba(0,0,0,.50);pointer-events:none}.scanBox.ok{border-color:var(--blue);box-shadow:0 0 0 9999px rgba(0,0,0,.50),0 0 20px var(--blue)}.scanBox.err{border-color:var(--red)}.label{position:absolute;left:40%;top:38%;width:20%;text-align:center;color:#34d399;font-weight:800;text-shadow:0 1px 2px #000}.grid{display:grid;grid-template-columns:1fr;gap:12px}@media(min-width:800px){.grid{grid-template-columns:1fr 1fr}}canvas{max-width:100%;border-radius:12px;border:1px solid var(--line);background:#fff}.big{font-size:28px;font-weight:900}.okText{color:var(--blue)}.badText{color:var(--red)}textarea{width:100%;min-height:70px;border:1px solid var(--line);border-radius:12px;padding:10px;background:#f9fafb}.pill{display:inline-block;border:1px solid var(--line);border-radius:999px;padding:8px 10px;background:#f9fafb}.table{width:100%;border-collapse:collapse}.table th,.table td{padding:9px;border-bottom:1px solid var(--line);text-align:left}.right{text-align:right!important}.small{font-size:13px}
+</style>
+</head>
+<body><main>
+<h1>Panini Sticker Scanner</h1>
+<div class="muted">Clean v11: smaller scan box, automatic scan, and OCR cleanup for bold white text such as <b>KSA 6</b>.</div>
+<section class="card">
+  <div class="row">
+    <button id="startBtn">Start Camera</button>
+    <button id="stopBtn" class="secondary">Stop</button>
+    <button id="manualBtn" class="secondary">Scan Now</button>
+    <button id="undoBtn" class="danger">Undo Last</button>
+    <label class="pill"><input id="autoAdd" type="checkbox" checked> Auto add</label>
+  </div>
+  <div id="status" class="muted" style="margin:10px 4px">Camera not started.</div>
+  <div class="stage">
+    <video id="video" playsinline muted autoplay></video>
+    <div id="box" class="scanBox"></div>
+    <div class="label">CODE ONLY</div>
+  </div>
+  <p class="small muted">Place only the code inside the green box. It scans automatically after the camera starts.</p>
+</section>
+<div class="grid">
+<section class="card"><h2>Cropped area</h2><canvas id="cropCanvas"></canvas></section>
+<section class="card"><h2>Detected</h2><div id="detected" class="big">None</div><p id="hint" class="muted"></p><h2>Raw OCR</h2><textarea id="rawText" readonly></textarea></section>
+</div>
+<section class="card"><h2>Manual add</h2><div class="row"><input id="manualInput" placeholder="KSA 6" style="padding:12px;border:1px solid var(--line);border-radius:12px"><button id="addManual">Add</button></div></section>
+<section class="card"><h2>Inventory</h2><div class="row"><button id="exportBtn" class="secondary">Export CSV</button><button id="clearBtn" class="danger">Clear</button></div><div id="summary" class="muted" style="margin:8px 0"></div><table class="table"><thead><tr><th>Sticker ID</th><th class="right">Qty</th><th class="right">Dup</th></tr></thead><tbody id="tbody"></tbody></table></section>
+</main>
+<script>
+const video=document.getElementById('video'), cropCanvas=document.getElementById('cropCanvas'), rawText=document.getElementById('rawText'), statusEl=document.getElementById('status'), detectedEl=document.getElementById('detected'), hintEl=document.getElementById('hint'), boxEl=document.getElementById('box');
+let stream=null, worker=null, timer=null, busy=false, lastAccepted='', lastSeen='', missCount=0;
+let inv=JSON.parse(localStorage.getItem('panini_inventory_v11')||'{}');
+let history=JSON.parse(localStorage.getItem('panini_scan_history_v11')||'[]');
+const VALID=new Set('ARG AUS AUT BEL BIH BRA CAN CIV COD COL CPV CRO CUW CZE DZA ECU EGY ENG ESP FRA GER GHA HAI HTI IRN IRI IRQ JOR JPN KOR KSA MAR MEX NED NOR NZL PAN PAR POR QAT RSA SCO SEN SUI SWE TUN TUR URU USA UZB'.split(' '));
+const digitFix={O:'0',Q:'0',D:'0',I:'1',L:'1',T:'1',Z:'2',S:'5',G:'6',B:'8'};
+function save(){localStorage.setItem('panini_inventory_v11',JSON.stringify(inv));localStorage.setItem('panini_scan_history_v11',JSON.stringify(history));render()}
+function render(){document.getElementById('tbody').innerHTML=Object.keys(inv).sort().map(k=>`<tr><td>${k}</td><td class="right">${inv[k]}</td><td class="right">${Math.max(0,inv[k]-1)}</td></tr>`).join('');const vals=Object.values(inv);document.getElementById('summary').textContent=`Total ${vals.reduce((a,b)=>a+b,0)} | Unique ${Object.keys(inv).length} | Duplicates ${vals.reduce((a,b)=>a+Math.max(0,b-1),0)}`}
+function add(id){if(!id)return;inv[id]=(inv[id]||0)+1;history.push(id);save();detectedEl.innerHTML=`<span class="okText">Added ${id}</span>`;hintEl.textContent='Move to the next sticker.';try{navigator.vibrate&&navigator.vibrate(80)}catch(e){}}
+function undoLast(){const id=history.pop();if(!id){detectedEl.innerHTML='<span class="badText">Nothing to undo</span>';hintEl.textContent='No previous scan found.';return;}if(inv[id]){inv[id]-=1;if(inv[id]<=0)delete inv[id];}lastAccepted='';lastSeen='';missCount=3;save();detectedEl.innerHTML=`<span class="badText">Removed ${id}</span>`;hintEl.textContent='Last scanned sticker removed. Hold the next sticker in the box.';statusEl.textContent=`Undid ${id}`;}
+function clean(s){return (s||'').toUpperCase().replace(/[|]/g,'I').replace(/[—–_\-.]+/g,' ').replace(/[^A-Z0-9\s]/g,' ').replace(/\s+/g,' ').trim()}
+function variantsFromToken(token){
+  token=token.replace(/\s/g,''); const out=[];
+  // Normal: KSA6, KSA06, KSA 6
+  let m=token.match(/([A-Z]{3})([0-9]{1,2})/); if(m) out.push([m[1],m[2]]);
+  // OCR common: KSAG means KSA6, IRQG means IRQ6/9 depending text, final letter can be a digit
+  m=token.match(/([A-Z]{3})([A-Z])$/); if(m && digitFix[m[2]]) out.push([m[1],digitFix[m[2]]]);
+  // If OCR joined 4 chars but last char was read as letter digit
+  if(token.length===4 && /^[A-Z]{4}$/.test(token) && digitFix[token[3]]) out.push([token.slice(0,3),digitFix[token[3]]]);
+  return out;
+}
+function extractId(text){
+  const s=clean(text); const tokens=s.split(' ').filter(Boolean); const candidates=[];
+  // sliding tokens allow wildcard noise front/back
+  for(const tok of tokens){candidates.push(...variantsFromToken(tok));}
+  // also test complete joined string because OCR may output "KSA G" or line breaks
+  candidates.push(...variantsFromToken(s.replace(/\s/g,'')));
+  // pattern with spaces, KSA 6
+  let re=/([A-Z]{3})\s*([0-9]{1,2})/g,m; while((m=re.exec(s))) candidates.push([m[1],m[2]]);
+  for(const [code,n] of candidates){const num=parseInt(n,10); if(VALID.has(code)&&num>=1&&num<=99) return `${code} ${num}`;}
+  return '';
+}
+async function ensureWorker(){if(worker)return worker;statusEl.textContent='Loading OCR...';worker=await Tesseract.createWorker('eng');await worker.setParameters({tessedit_char_whitelist:'ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789 ',tessedit_pageseg_mode:Tesseract.PSM.SINGLE_WORD});return worker}
+function crop(){
+  if(!video.videoWidth) throw new Error('Camera not ready');
+  const vw=video.videoWidth,vh=video.videoHeight,r={x:.44,y:.43,w:.12,h:.17}; const sx=vw*r.x,sy=vh*r.y,sw=vw*r.w,sh=vh*r.h,scale=5;
+  cropCanvas.width=Math.max(1,sw*scale); cropCanvas.height=Math.max(1,sh*scale);
+  const ctx=cropCanvas.getContext('2d',{willReadFrequently:true}); ctx.imageSmoothingEnabled=true; ctx.imageSmoothingQuality='high';
+  ctx.drawImage(video,sx,sy,sw,sh,0,0,cropCanvas.width,cropCanvas.height);
+  const img=ctx.getImageData(0,0,cropCanvas.width,cropCanvas.height),d=img.data;
+  for(let i=0;i<d.length;i+=4){let g=.299*d[i]+.587*d[i+1]+.114*d[i+2];
+    // invert: white text on black becomes black text on white, easier for Tesseract
+    g=255-g; g=(g-128)*2.2+128; g=g>145?255:(g<80?0:g); d[i]=d[i+1]=d[i+2]=g;}
+  ctx.putImageData(img,0,0); return cropCanvas;
+}
+async function scan(){await ensureWorker(); const canvas=crop(); const {data:{text}}=await worker.recognize(canvas); rawText.value=text; const id=extractId(text); detectedEl.innerHTML=id?`<span class="okText">${id}</span>`:'<span class="badText">None</span>'; hintEl.textContent=id?'Valid code found.':'No valid code yet.'; return id}
+async function loop(){if(busy||!stream)return; busy=true; try{const id=await scan(); if(id){boxEl.className='scanBox ok'; statusEl.textContent=`Detected ${id}`; missCount=0; if(document.getElementById('autoAdd').checked && id!==lastAccepted){add(id); lastAccepted=id; lastSeen=id;}} else {boxEl.className='scanBox'; statusEl.textContent='Scanning...'; if(++missCount>=2){lastAccepted=''; lastSeen='';}}}catch(e){statusEl.textContent=e.message} busy=false;}
+async function start(){try{stream=await navigator.mediaDevices.getUserMedia({video:{facingMode:{ideal:'environment'},width:{ideal:1920},height:{ideal:1080}},audio:false}); video.srcObject=stream; await video.play(); await ensureWorker(); statusEl.textContent='Auto scan running.'; if(timer)clearInterval(timer); timer=setInterval(loop,900)}catch(e){statusEl.innerHTML=`<span class="badText">Camera failed: ${e.message}</span>`}}
+function stop(){if(timer)clearInterval(timer);timer=null;if(stream){stream.getTracks().forEach(t=>t.stop());stream=null}statusEl.textContent='Stopped.'}
+document.getElementById('startBtn').onclick=start;document.getElementById('stopBtn').onclick=stop;document.getElementById('manualBtn').onclick=async()=>{const id=await scan(); if(id)add(id)};document.getElementById('undoBtn').onclick=undoLast;document.getElementById('addManual').onclick=()=>{const id=extractId(document.getElementById('manualInput').value); if(id)add(id)};document.getElementById('clearBtn').onclick=()=>{if(confirm('Clear inventory?')){inv={};history=[];save()}};document.getElementById('exportBtn').onclick=()=>{const csv='Sticker ID,Qty,Duplicates\n'+Object.keys(inv).sort().map(k=>`${k},${inv[k]},${Math.max(0,inv[k]-1)}`).join('\n');const a=document.createElement('a');a.href=URL.createObjectURL(new Blob([csv],{type:'text/csv'}));a.download='panini_inventory.csv';a.click()};
+render();
+</script></body></html>
